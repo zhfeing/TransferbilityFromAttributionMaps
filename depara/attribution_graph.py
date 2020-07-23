@@ -1,5 +1,7 @@
 from typing import Type, Dict, Any
 import itertools
+
+import numpy as np
 from numpy import Inf
 import networkx
 
@@ -8,7 +10,18 @@ from torch.nn import Module
 from torch.utils.data import Dataset
 
 from depara.attribution_map import attribution_map, attr_map_similarity
-from depara.utils import print_graph
+
+
+def graph_to_array(graph: networkx.Graph):
+    weight_matrix = np.zeros((len(graph.nodes), len(graph.nodes)))
+    for i, n1 in enumerate(graph.nodes):
+        for j, n2 in enumerate(graph.nodes):
+            try:
+                dist = graph[n1][n2]["weight"]
+            except KeyError:
+                dist = 1
+            weight_matrix[i, j] = dist
+    return weight_matrix
 
 
 class FeatureMapExtractor():
@@ -88,25 +101,67 @@ def get_attribution_graph(
             )
             attribution_graph.add_edge(i, j, weight=weight)
 
-    print_graph(attribution_graph)
+    return attribution_graph
 
 
-def graph_similarity(g1: networkx.Graph, g2: networkx.Graph):
+def edge_to_embedding(graph: networkx.Graph):
+    adj = graph_to_array(graph)
+    up_tri_mask = np.tri(*adj.shape[-2:], k=0, dtype=bool)
+    return adj[up_tri_mask]
+
+
+def embedding_to_rank(embedding: np.ndarray):
+    order = embedding.argsort()
+    ranks = order.argsort()
+    return ranks
+
+
+def graph_similarity(g1: networkx.Graph, g2: networkx.Graph, Lambda: float = 1.0):
     nodes_1 = g1.nodes(data=True)
     nodes_2 = g2.nodes(data=True)
     assert len(nodes_1) == len(nodes_2)
 
-    # for 
+    # calculate vertex similarity
+    v_s = 0
+    n = len(g1.nodes)
+    for i in range(n):
+        v_s += attr_map_similarity(
+            map_1=g1.nodes(data=True)[i]["attribution_map"],
+            map_2=g2.nodes(data=True)[i]["attribution_map"]
+        )
+    vertex_similarity = v_s / n
+
+    # calculate edges similarity
+    emb_1 = edge_to_embedding(g1)
+    emb_2 = edge_to_embedding(g2)
+    rank_1 = embedding_to_rank(emb_1)
+    rank_2 = embedding_to_rank(emb_2)
+    k = emb_1.shape[0]
+    edge_similarity = 1 - 6 * np.sum(np.square(rank_1 - rank_2)) / (k ** 3 - k)
+
+    return vertex_similarity + Lambda * edge_similarity
+
 
 if __name__ == "__main__":
     from captum.attr import InputXGradient
     from torchvision.models import resnet34
 
-    model = resnet34(num_classes=10)
-    get_attribution_graph(
-        model,
+    model_1 = resnet34(num_classes=10)
+    graph_1 = get_attribution_graph(
+        model_1,
         attribution_type=InputXGradient,
         with_noise=False,
         probe_data=torch.rand(10, 3, 244, 244),
         device=torch.device("cpu")
     )
+
+    model_2 = resnet34(num_classes=10)
+    graph_2 = get_attribution_graph(
+        model_2,
+        attribution_type=InputXGradient,
+        with_noise=False,
+        probe_data=torch.rand(10, 3, 244, 244),
+        device=torch.device("cpu")
+    )
+
+    print(graph_similarity(graph_1, graph_2))

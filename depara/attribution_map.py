@@ -47,13 +47,13 @@ def attr_map_distance(map_1: torch.Tensor, map_2: torch.Tensor):
     # n_p = torch.tensor(map_1.shape[0], dtype=map_1.dtype, device=map_1.device)
     # dist = torch.cosine_similarity(map_1.flatten(1), map_2.flatten(1)).mean()
     dist = torch.dist(map_1.flatten(1), map_2.flatten(1), p=2).mean()
-    return dist
+    return dist.item()
 
 
 def attr_map_similarity(map_1: torch.Tensor, map_2: torch.Tensor):
     assert(map_1.shape == map_2.shape)
     dist = torch.cosine_similarity(map_1.flatten(1), map_2.flatten(1)).mean()
-    return dist
+    return dist.item()
 
 
 if __name__ == "__main__":
